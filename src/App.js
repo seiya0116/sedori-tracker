@@ -8,25 +8,192 @@ const STATUSES = [
   { value: "sold", label: "売却済み", color: "#0F6E56", bg: "#E1F5EE" },
 ];
 
+const S = {
+  wrap: { fontFamily: "'Hiragino Sans','Hiragino Kaku Gothic ProN',sans-serif", minHeight: "100vh", background: "#f5f5f3", color: "#1a1a1a" },
+  container: { maxWidth: 900, margin: "0 auto", padding: "1rem" },
+  header: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", flexWrap: "wrap", gap: 8 },
+  title: { fontSize: 20, fontWeight: 700, margin: 0 },
+  subtitle: { fontSize: 12, color: "#888", margin: 0 },
+  badge: { fontSize: 12, color: "#0F6E56", background: "#E1F5EE", padding: "4px 12px", borderRadius: 99 },
+  logoutBtn: { fontSize: 12, padding: "6px 14px", border: "0.5px solid #ddd", borderRadius: 8, cursor: "pointer", background: "#fff", fontFamily: "inherit" },
+  summaryGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginBottom: "1rem" },
+  summaryCard: { background: "#fff", borderRadius: 12, padding: "12px 14px", border: "0.5px solid #e5e5e5" },
+  card: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 14, padding: "1rem", marginBottom: "1rem" },
+  formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginBottom: 10 },
+  label: { fontSize: 11, color: "#888", marginBottom: 3, display: "block" },
+  input: { width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "0.5px solid #ddd", borderRadius: 8, fontSize: 13, outline: "none", fontFamily: "inherit" },
+  select: { width: "100%", padding: "8px 10px", border: "0.5px solid #ddd", borderRadius: 8, fontSize: 13, outline: "none", fontFamily: "inherit", background: "#fff" },
+  btn: { width: "100%", padding: "10px 0", background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
+  btnSm: { padding: "6px 12px", border: "none", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 },
+  filterRow: { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" },
+  listCard: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 14, overflow: "hidden" },
+  itemRow: { padding: "12px 14px", borderBottom: "0.5px solid #f0f0f0" },
+  childRow: { padding: "10px 14px 10px 32px", borderBottom: "0.5px solid #f0f0f0", background: "#fafaf9", borderLeft: "3px solid #e5e5e5" },
+  metaRow: { display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, color: "#666", marginTop: 6 },
+  warning: { marginTop: 6, fontSize: 11, color: "#E24B4A", background: "#FCEBEB", padding: "4px 10px", borderRadius: 6, display: "inline-block" },
+  authWrap: { maxWidth: 380, margin: "80px auto", padding: "0 1rem" },
+  authCard: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 16, padding: "2rem" },
+  link: { fontSize: 12, color: "#185FA5", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", fontFamily: "inherit", padding: 0 },
+};
+
 function calcProfit(item) {
-  const feeAmt = Math.round(item.sell * item.fee / 100);
-  const totalCost = item.buy + item.ship_in + item.ship_out + feeAmt;
+  const feeAmt = Math.round((item.sell || 0) * (item.fee || 0) / 100);
+  const totalCost = (item.buy || 0) + (item.ship_in || 0) + (item.ship_out || 0) + feeAmt;
   const minSell = totalCost + 1;
-  const profit = item.sell - totalCost;
+  const profit = (item.sell || 0) - totalCost;
   const roi = totalCost > 0 ? Math.round((profit / totalCost) * 100) : 0;
   return { feeAmt, totalCost, profit, minSell, roi };
 }
 
-function calcBundleProfit(parent, children) {
-  const parentProfit = calcProfit(parent);
-  const childrenProfit = children.reduce((s, c) => s + calcProfit(c).profit, 0);
-  const totalProfit = parentProfit.profit + childrenProfit;
-  const totalCost = parentProfit.totalCost + children.reduce((s, c) => s + calcProfit(c).totalCost, 0);
-  const roi = totalCost > 0 ? Math.round((totalProfit / totalCost) * 100) : 0;
-  return { totalProfit, totalCost, roi };
+const EMPTY_FORM = { name: "", platform: "メルカリ", buy: "", ship_in: "", sell: "", fee: "10", ship_out: "", status: "pending", parent_id: "" };
+
+// ── フォームコンポーネント（App外で定義することでフォーカス問題を解消）──
+function ItemForm({ data, setData, onSubmit, onCancel, isEdit, parentOptions }) {
+  return (
+    <div style={S.card}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: "#555" }}>
+        {isEdit ? "商品を編集" : "商品を追加"}
+      </div>
+      <div style={S.formGrid}>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={S.label}>商品名</label>
+          <input type="text" value={data.name} onChange={e => setData({ ...data, name: e.target.value })} style={S.input} />
+        </div>
+        {[
+          { key: "buy", label: "仕入れ価格（¥）" },
+          { key: "ship_in", label: "仕入れ送料（¥）" },
+          { key: "sell", label: "出品価格（¥）" },
+          { key: "fee", label: "手数料（%）" },
+          { key: "ship_out", label: "発送送料（¥）" },
+        ].map(f => (
+          <div key={f.key}>
+            <label style={S.label}>{f.label}</label>
+            <input type="number" value={data[f.key]} onChange={e => setData({ ...data, [f.key]: e.target.value })} style={S.input} />
+          </div>
+        ))}
+        <div>
+          <label style={S.label}>プラットフォーム</label>
+          <select value={data.platform} onChange={e => setData({ ...data, platform: e.target.value })} style={S.select}>
+            {PLATFORMS.map(p => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={S.label}>ステータス</label>
+          <select value={data.status} onChange={e => setData({ ...data, status: e.target.value })} style={S.select}>
+            {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
+          </select>
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={S.label}>まとめ売りセットに追加（任意）</label>
+          <select value={data.parent_id || ""} onChange={e => setData({ ...data, parent_id: e.target.value })} style={S.select}>
+            <option value="">なし（単品）</option>
+            {parentOptions.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onSubmit} style={{ ...S.btnSm, background: "#1a1a1a", color: "#fff", flex: 1, padding: "10px 0" }}>
+          {isEdit ? "更新する" : "追加する"}
+        </button>
+        {onCancel && (
+          <button onClick={onCancel} style={{ ...S.btnSm, background: "#f0f0f0", color: "#555", flex: 1, padding: "10px 0" }}>
+            キャンセル
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
-const EMPTY_FORM = { name: "", platform: "メルカリ", buy: "", ship_in: "", sell: "", fee: "10", ship_out: "", status: "pending", parent_id: "" };
+// ── 商品カードコンポーネント（App外で定義）──
+function ItemCard({ item, children, isChild, expandedIds, toggleExpand, updateStatus, setEditItem, deleteItem }) {
+  const hasChildren = children && children.length > 0;
+  const isExpanded = expandedIds[item.id];
+  const st = STATUSES.find(s => s.value === item.status) || STATUSES[0];
+
+  let profit, minSell, roi;
+  if (hasChildren) {
+    const childProfits = children.reduce((s, c) => {
+      const cp = calcProfit(c);
+      return { profit: s.profit + cp.profit, totalCost: s.totalCost + cp.totalCost };
+    }, { profit: 0, totalCost: 0 });
+    const parentCalc = calcProfit(item);
+    const totalProfit = parentCalc.profit + childProfits.profit;
+    const totalCost = parentCalc.totalCost + childProfits.totalCost;
+    profit = totalProfit;
+    minSell = null;
+    roi = totalCost > 0 ? Math.round((totalProfit / totalCost) * 100) : 0;
+  } else {
+    const calc = calcProfit(item);
+    profit = calc.profit;
+    minSell = calc.minSell;
+    roi = calc.roi;
+  }
+
+  const sellTooLow = !hasChildren && item.sell < minSell;
+
+  return (
+    <>
+      <div style={isChild ? S.childRow : S.itemRow}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+              {hasChildren && (
+                <button onClick={() => toggleExpand(item.id)}
+                  style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: "0 2px", color: "#185FA5", fontFamily: "inherit" }}>
+                  {isExpanded ? "▼" : "▶"}
+                </button>
+              )}
+              <span style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</span>
+              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: st.bg, color: st.color, fontWeight: 600 }}>{st.label}</span>
+              <span style={{ fontSize: 11, color: "#aaa" }}>{item.platform}</span>
+              {hasChildren && (
+                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: "#f0f0f0", color: "#666" }}>
+                  セット {children.length}点
+                </span>
+              )}
+            </div>
+            <div style={S.metaRow}>
+              <span>仕入れ <b style={{ color: "#1a1a1a" }}>¥{Number(item.buy || 0).toLocaleString()}</b></span>
+              {!hasChildren && <span>出品価格 <b style={{ color: sellTooLow ? "#E24B4A" : "#1a1a1a" }}>¥{Number(item.sell || 0).toLocaleString()}</b></span>}
+              {!hasChildren && minSell && <span>最低販売額 <b style={{ color: "#E24B4A" }}>¥{minSell.toLocaleString()}</b></span>}
+              <span>{hasChildren ? "セット利益" : "利益"} <b style={{ color: profit >= 0 ? "#0F6E56" : "#E24B4A" }}>¥{profit.toLocaleString()}</b></span>
+              <span>ROI <b style={{ color: roi >= 20 ? "#0F6E56" : roi >= 0 ? "#BA7517" : "#E24B4A" }}>{roi}%</b></span>
+            </div>
+            {sellTooLow && (
+              <div style={S.warning}>⚠ 出品価格が最低販売額を下回っています！¥{minSell.toLocaleString()}以上に設定してください</div>
+            )}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", flexShrink: 0 }}>
+            <select value={item.status} onChange={e => updateStatus(item.id, e.target.value)}
+              style={{ padding: "4px 8px", border: "0.5px solid #ddd", borderRadius: 8, fontSize: 11, cursor: "pointer", outline: "none", fontFamily: "inherit", background: "#fff" }}>
+              {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={() => setEditItem({ ...item })} style={{ ...S.btnSm, background: "#E6F1FB", color: "#185FA5" }}>編集</button>
+              <button onClick={() => deleteItem(item.id)} style={{ ...S.btnSm, background: "#fff7f7", color: "#E24B4A", border: "0.5px solid #ffd0d0" }}>削除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {hasChildren && isExpanded && children.map(child => (
+        <ItemCard
+          key={child.id}
+          item={child}
+          children={[]}
+          isChild={true}
+          expandedIds={expandedIds}
+          toggleExpand={toggleExpand}
+          updateStatus={updateStatus}
+          setEditItem={setEditItem}
+          deleteItem={deleteItem}
+        />
+      ))}
+    </>
+  );
+}
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -62,8 +229,8 @@ export default function App() {
 
   const fetchItems = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from("items").select("*").order("created_at", { ascending: false });
-    if (!error) setItems(data);
+    const { data, error } = await supabase.from("items").select("*").order("created_at", { ascending: true });
+    if (!error) setItems(data || []);
     setLoading(false);
   };
 
@@ -121,9 +288,12 @@ export default function App() {
     if (!editItem.name || !editItem.sell) return;
     const { error } = await supabase.from("items").update({
       name: editItem.name, platform: editItem.platform,
-      buy: parseFloat(editItem.buy) || 0, ship_in: parseFloat(editItem.ship_in) || 0,
-      sell: parseFloat(editItem.sell) || 0, fee: parseFloat(editItem.fee) || 10,
-      ship_out: parseFloat(editItem.ship_out) || 0, status: editItem.status,
+      buy: parseFloat(editItem.buy) || 0,
+      ship_in: parseFloat(editItem.ship_in) || 0,
+      sell: parseFloat(editItem.sell) || 0,
+      fee: parseFloat(editItem.fee) || 10,
+      ship_out: parseFloat(editItem.ship_out) || 0,
+      status: editItem.status,
       parent_id: editItem.parent_id || null,
     }).eq("id", editItem.id);
     if (!error) { fetchItems(); setEditItem(null); showMsg("更新しました"); }
@@ -143,189 +313,58 @@ export default function App() {
 
   const toggleExpand = (id) => setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
 
-  // 親子分類
   const parentItems = items.filter(i => !i.parent_id);
   const childrenOf = (id) => items.filter(i => i.parent_id === id);
   const filteredParents = filterStatus === "all" ? parentItems : parentItems.filter(i => i.status === filterStatus);
 
-  const totalInvest = items.filter(i => !i.parent_id).reduce((s, i) => s + i.buy + i.ship_in, 0);
-  const totalProfit = items.filter(i => !i.parent_id).reduce((s, i) => {
-    const children = childrenOf(i.id);
-    if (children.length > 0) return s + calcBundleProfit(i, children).totalProfit;
-    return s + calcProfit(i).profit;
+  const totalInvest = parentItems.reduce((s, i) => s + (i.buy || 0) + (i.ship_in || 0), 0);
+  const totalProfit = parentItems.reduce((s, i) => {
+    const ch = childrenOf(i.id);
+    const pp = calcProfit(i);
+    const cp = ch.reduce((cs, c) => cs + calcProfit(c).profit, 0);
+    return s + pp.profit + cp;
   }, 0);
-  const soldProfit = items.filter(i => !i.parent_id && i.status === "sold").reduce((s, i) => {
-    const children = childrenOf(i.id);
-    if (children.length > 0) return s + calcBundleProfit(i, children).totalProfit;
-    return s + calcProfit(i).profit;
+  const soldProfit = parentItems.filter(i => i.status === "sold").reduce((s, i) => {
+    const ch = childrenOf(i.id);
+    const pp = calcProfit(i);
+    const cp = ch.reduce((cs, c) => cs + calcProfit(c).profit, 0);
+    return s + pp.profit + cp;
   }, 0);
 
-  const s = {
-    wrap: { fontFamily: "'Hiragino Sans','Hiragino Kaku Gothic ProN',sans-serif", minHeight: "100vh", background: "#f5f5f3", color: "#1a1a1a" },
-    container: { maxWidth: 900, margin: "0 auto", padding: "1rem" },
-    header: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", flexWrap: "wrap", gap: 8 },
-    title: { fontSize: 20, fontWeight: 700, margin: 0 },
-    subtitle: { fontSize: 12, color: "#888", margin: 0 },
-    badge: { fontSize: 12, color: "#0F6E56", background: "#E1F5EE", padding: "4px 12px", borderRadius: 99 },
-    logoutBtn: { fontSize: 12, padding: "6px 14px", border: "0.5px solid #ddd", borderRadius: 8, cursor: "pointer", background: "#fff", fontFamily: "inherit" },
-    summaryGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginBottom: "1rem" },
-    summaryCard: { background: "#fff", borderRadius: 12, padding: "12px 14px", border: "0.5px solid #e5e5e5" },
-    card: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 14, padding: "1rem", marginBottom: "1rem" },
-    formGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 8, marginBottom: 10 },
-    label: { fontSize: 11, color: "#888", marginBottom: 3, display: "block" },
-    input: { width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "0.5px solid #ddd", borderRadius: 8, fontSize: 13, outline: "none", fontFamily: "inherit" },
-    select: { width: "100%", padding: "8px 10px", border: "0.5px solid #ddd", borderRadius: 8, fontSize: 13, outline: "none", fontFamily: "inherit", background: "#fff" },
-    btn: { width: "100%", padding: "10px 0", background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" },
-    btnSm: { padding: "6px 12px", border: "none", borderRadius: 8, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 },
-    filterRow: { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" },
-    listCard: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 14, overflow: "hidden" },
-    itemRow: { padding: "12px 14px", borderBottom: "0.5px solid #f0f0f0" },
-    childRow: { padding: "10px 14px 10px 28px", borderBottom: "0.5px solid #f0f0f0", background: "#fafaf9" },
-    metaRow: { display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, color: "#666", marginTop: 6 },
-    warning: { marginTop: 6, fontSize: 11, color: "#E24B4A", background: "#FCEBEB", padding: "4px 10px", borderRadius: 6, display: "inline-block" },
-    authWrap: { maxWidth: 380, margin: "80px auto", padding: "0 1rem" },
-    authCard: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 16, padding: "2rem" },
-    link: { fontSize: 12, color: "#185FA5", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", fontFamily: "inherit", padding: 0 },
-  };
+  const parentOptions = parentItems.filter(p => !editItem || p.id !== editItem.id);
 
-  const ItemForm = ({ data, setData, onSubmit, onCancel, isEdit }) => (
-    <div style={s.card}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: "#555" }}>{isEdit ? "商品を編集" : "商品を追加"}</div>
-      <div style={s.formGrid}>
-        {[
-          { key: "name", label: "商品名", type: "text" },
-          { key: "buy", label: "仕入れ価格（¥）", type: "number" },
-          { key: "ship_in", label: "仕入れ送料（¥）", type: "number" },
-          { key: "sell", label: "出品価格（¥）", type: "number" },
-          { key: "fee", label: "手数料（%）", type: "number" },
-          { key: "ship_out", label: "発送送料（¥）", type: "number" },
-        ].map(f => (
-          <div key={f.key}>
-            <label style={s.label}>{f.label}</label>
-            <input type={f.type} value={data[f.key]} onChange={e => setData({ ...data, [f.key]: e.target.value })} style={s.input} />
-          </div>
-        ))}
-        <div>
-          <label style={s.label}>プラットフォーム</label>
-          <select value={data.platform} onChange={e => setData({ ...data, platform: e.target.value })} style={s.select}>
-            {PLATFORMS.map(p => <option key={p}>{p}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={s.label}>ステータス</label>
-          <select value={data.status} onChange={e => setData({ ...data, status: e.target.value })} style={s.select}>
-            {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
-          </select>
-        </div>
-        <div style={{ gridColumn: "1 / -1" }}>
-          <label style={s.label}>まとめ売りセットに追加（任意）</label>
-          <select value={data.parent_id || ""} onChange={e => setData({ ...data, parent_id: e.target.value })} style={s.select}>
-            <option value="">なし（単品）</option>
-            {parentItems.filter(p => p.id !== data.id).map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={onSubmit} style={{ ...s.btnSm, background: "#1a1a1a", color: "#fff", flex: 1, padding: "10px 0" }}>
-          {isEdit ? "更新する" : "追加する"}
-        </button>
-        {onCancel && <button onClick={onCancel} style={{ ...s.btnSm, background: "#f0f0f0", color: "#555", flex: 1, padding: "10px 0" }}>キャンセル</button>}
-      </div>
-    </div>
-  );
-
-  const ItemCard = ({ item, isChild }) => {
-    const children = childrenOf(item.id);
-    const hasChildren = children.length > 0;
-    const isExpanded = expandedIds[item.id];
-    const { profit, minSell, roi } = hasChildren ? calcBundleProfit(item, children) : calcProfit(item);
-    const st = STATUSES.find(s => s.value === item.status);
-    const sellTooLow = !hasChildren && item.sell < minSell;
-
-    return (
-      <>
-        <div style={isChild ? s.childRow : s.itemRow}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-                {hasChildren && (
-                  <button onClick={() => toggleExpand(item.id)}
-                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, padding: "0 2px", color: "#185FA5", fontFamily: "inherit" }}>
-                    {isExpanded ? "▼" : "▶"}
-                  </button>
-                )}
-                {isChild && <span style={{ fontSize: 11, color: "#aaa" }}>└</span>}
-                <span style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</span>
-                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: st.bg, color: st.color, fontWeight: 600 }}>{st.label}</span>
-                <span style={{ fontSize: 11, color: "#aaa" }}>{item.platform}</span>
-                {hasChildren && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: "#f0f0f0", color: "#666" }}>セット {children.length}点</span>}
-              </div>
-              <div style={s.metaRow}>
-                <span>仕入れ <b style={{ color: "#1a1a1a" }}>¥{Number(item.buy).toLocaleString()}</b></span>
-                {!hasChildren && <span>出品価格 <b style={{ color: sellTooLow ? "#E24B4A" : "#1a1a1a" }}>¥{Number(item.sell).toLocaleString()}</b></span>}
-                {!hasChildren && <span>最低販売額 <b style={{ color: "#E24B4A" }}>¥{minSell.toLocaleString()}</b></span>}
-                <span>{hasChildren ? "セット利益" : "利益"} <b style={{ color: profit >= 0 ? "#0F6E56" : "#E24B4A" }}>¥{profit.toLocaleString()}</b></span>
-                <span>ROI <b style={{ color: roi >= 20 ? "#0F6E56" : roi >= 0 ? "#BA7517" : "#E24B4A" }}>{roi}%</b></span>
-              </div>
-              {sellTooLow && <div style={s.warning}>⚠ 出品価格が最低販売額を下回っています！¥{minSell.toLocaleString()}以上に設定してください</div>}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", flexShrink: 0 }}>
-              <select value={item.status} onChange={e => updateStatus(item.id, e.target.value)}
-                style={{ padding: "4px 8px", border: "0.5px solid #ddd", borderRadius: 8, fontSize: 11, cursor: "pointer", outline: "none", fontFamily: "inherit", background: "#fff" }}>
-                {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
-              </select>
-              <div style={{ display: "flex", gap: 4 }}>
-                <button onClick={() => setEditItem({ ...item })} style={{ ...s.btnSm, background: "#E6F1FB", color: "#185FA5" }}>編集</button>
-                <button onClick={() => deleteItem(item.id)} style={{ ...s.btnSm, background: "#fff7f7", color: "#E24B4A", border: "0.5px solid #ffd0d0" }}>削除</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        {hasChildren && isExpanded && children.map(child => (
-          <ItemCard key={child.id} item={child} isChild={true} />
-        ))}
-      </>
-    );
-  };
-
-  // パスワード再設定画面
   if (isRecovery) return (
-    <div style={s.wrap}>
-      <div style={s.authWrap}>
-        <div style={s.authCard}>
-          <h1 style={{ ...s.title, marginBottom: 4 }}>新しいパスワード設定</h1>
-          <p style={{ ...s.subtitle, marginBottom: "1.5rem" }}>新しいパスワードを入力してください</p>
+    <div style={S.wrap}>
+      <div style={S.authWrap}>
+        <div style={S.authCard}>
+          <h1 style={{ ...S.title, marginBottom: 4 }}>新しいパスワード設定</h1>
           <form onSubmit={handleNewPassword}>
             <div style={{ marginBottom: 16 }}>
-              <label style={s.label}>新しいパスワード（6文字以上）</label>
-              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={s.input} placeholder="••••••••" required minLength={6} />
+              <label style={S.label}>新しいパスワード（6文字以上）</label>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={S.input} placeholder="••••••••" required minLength={6} />
             </div>
             {resetMsg && <div style={{ fontSize: 12, color: "#E24B4A", marginBottom: 10 }}>{resetMsg}</div>}
-            <button type="submit" style={s.btn}>パスワードを変更する</button>
+            <button type="submit" style={S.btn}>パスワードを変更する</button>
           </form>
         </div>
       </div>
     </div>
   );
 
-  // パスワードリセット画面
   if (resetMode) return (
-    <div style={s.wrap}>
-      <div style={s.authWrap}>
-        <div style={s.authCard}>
-          <h1 style={{ ...s.title, marginBottom: 4 }}>パスワードリセット</h1>
-          <p style={{ ...s.subtitle, marginBottom: "1.5rem" }}>登録したメールアドレスを入力してください</p>
+    <div style={S.wrap}>
+      <div style={S.authWrap}>
+        <div style={S.authCard}>
+          <h1 style={{ ...S.title, marginBottom: 4 }}>パスワードリセット</h1>
           <form onSubmit={handlePasswordReset}>
             <div style={{ marginBottom: 16 }}>
-              <label style={s.label}>メールアドレス</label>
-              <input type="email" value={resetEmail} onChange={e => setResetEmail(e.target.value)} style={s.input} placeholder="email@example.com" required />
+              <label style={S.label}>メールアドレス</label>
+              <input type="email" value={resetEmail} onChange={e => setResetEmail(e.target.value)} style={S.input} placeholder="email@example.com" required />
             </div>
             {resetMsg && <div style={{ fontSize: 12, color: resetMsg.includes("送信") ? "#0F6E56" : "#E24B4A", marginBottom: 10 }}>{resetMsg}</div>}
-            <button type="submit" style={s.btn}>リセットメールを送信</button>
+            <button type="submit" style={S.btn}>リセットメールを送信</button>
             <div style={{ textAlign: "center", marginTop: 12 }}>
-              <button style={s.link} onClick={() => { setResetMode(false); setResetMsg(""); }}>ログインに戻る</button>
+              <button style={S.link} onClick={() => { setResetMode(false); setResetMsg(""); }}>ログインに戻る</button>
             </div>
           </form>
         </div>
@@ -333,13 +372,12 @@ export default function App() {
     </div>
   );
 
-  // ログイン・新規登録画面
   if (!session) return (
-    <div style={s.wrap}>
-      <div style={s.authWrap}>
-        <div style={s.authCard}>
-          <h1 style={{ ...s.title, marginBottom: 4 }}>せどり収支管理</h1>
-          <p style={{ ...s.subtitle, marginBottom: "1.5rem" }}>RetroArc</p>
+    <div style={S.wrap}>
+      <div style={S.authWrap}>
+        <div style={S.authCard}>
+          <h1 style={{ ...S.title, marginBottom: 4 }}>せどり収支管理</h1>
+          <p style={{ ...S.subtitle, marginBottom: "1.5rem" }}>RetroArc</p>
           <div style={{ display: "flex", gap: 8, marginBottom: "1.5rem" }}>
             {["login", "signup"].map(m => (
               <button key={m} onClick={() => setAuthMode(m)}
@@ -350,20 +388,20 @@ export default function App() {
           </div>
           <form onSubmit={handleAuth}>
             <div style={{ marginBottom: 10 }}>
-              <label style={s.label}>メールアドレス</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={s.input} placeholder="email@example.com" required />
+              <label style={S.label}>メールアドレス</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={S.input} placeholder="email@example.com" required />
             </div>
             <div style={{ marginBottom: 8 }}>
-              <label style={s.label}>パスワード</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={s.input} placeholder="••••••••" required />
+              <label style={S.label}>パスワード</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={S.input} placeholder="••••••••" required />
             </div>
             {authMode === "login" && (
               <div style={{ textAlign: "right", marginBottom: 12 }}>
-                <button style={s.link} onClick={() => setResetMode(true)} type="button">パスワードを忘れた方はこちら</button>
+                <button style={S.link} onClick={() => setResetMode(true)} type="button">パスワードを忘れた方はこちら</button>
               </div>
             )}
             {authError && <div style={{ fontSize: 12, color: "#E24B4A", marginBottom: 10 }}>{authError}</div>}
-            <button type="submit" style={s.btn}>{authMode === "login" ? "ログイン" : "新規登録"}</button>
+            <button type="submit" style={S.btn}>{authMode === "login" ? "ログイン" : "新規登録"}</button>
           </form>
         </div>
       </div>
@@ -371,27 +409,27 @@ export default function App() {
   );
 
   return (
-    <div style={s.wrap}>
-      <div style={s.container}>
-        <div style={s.header}>
+    <div style={S.wrap}>
+      <div style={S.container}>
+        <div style={S.header}>
           <div>
-            <h1 style={s.title}>せどり収支管理</h1>
-            <p style={s.subtitle}>RetroArc · {session.user.email}</p>
+            <h1 style={S.title}>せどり収支管理</h1>
+            <p style={S.subtitle}>RetroArc · {session.user.email}</p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {msg && <span style={s.badge}>{msg} ✓</span>}
-            <button onClick={handleLogout} style={s.logoutBtn}>ログアウト</button>
+            {msg && <span style={S.badge}>{msg} ✓</span>}
+            <button onClick={handleLogout} style={S.logoutBtn}>ログアウト</button>
           </div>
         </div>
 
-        <div style={s.summaryGrid}>
+        <div style={S.summaryGrid}>
           {[
             { label: "総仕入れ額", value: `¥${totalInvest.toLocaleString()}`, color: "#1a1a1a" },
             { label: "予想利益合計", value: `¥${totalProfit.toLocaleString()}`, color: totalProfit >= 0 ? "#0F6E56" : "#E24B4A" },
             { label: "確定利益", value: `¥${soldProfit.toLocaleString()}`, color: "#0F6E56" },
             { label: "商品数", value: `${parentItems.length}点`, color: "#185FA5" },
           ].map(c => (
-            <div key={c.label} style={s.summaryCard}>
+            <div key={c.label} style={S.summaryCard}>
               <div style={{ fontSize: 11, color: "#888", marginBottom: 3 }}>{c.label}</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: c.color }}>{c.value}</div>
             </div>
@@ -399,12 +437,26 @@ export default function App() {
         </div>
 
         {editItem ? (
-          <ItemForm data={editItem} setData={setEditItem} onSubmit={updateItem} onCancel={() => setEditItem(null)} isEdit={true} />
+          <ItemForm
+            data={editItem}
+            setData={setEditItem}
+            onSubmit={updateItem}
+            onCancel={() => setEditItem(null)}
+            isEdit={true}
+            parentOptions={parentOptions}
+          />
         ) : (
-          <ItemForm data={form} setData={setForm} onSubmit={addItem} onCancel={null} isEdit={false} />
+          <ItemForm
+            data={form}
+            setData={setForm}
+            onSubmit={addItem}
+            onCancel={null}
+            isEdit={false}
+            parentOptions={parentOptions}
+          />
         )}
 
-        <div style={s.filterRow}>
+        <div style={S.filterRow}>
           {[{ value: "all", label: "すべて" }, ...STATUSES].map(st => (
             <button key={st.value} onClick={() => setFilterStatus(st.value)}
               style={{ padding: "5px 12px", borderRadius: 99, fontSize: 12, border: "0.5px solid #ddd", cursor: "pointer", fontFamily: "inherit", background: filterStatus === st.value ? "#1a1a1a" : "#fff", color: filterStatus === st.value ? "#fff" : "#555", fontWeight: filterStatus === st.value ? 600 : 400 }}>
@@ -413,13 +465,23 @@ export default function App() {
           ))}
         </div>
 
-        <div style={s.listCard}>
+        <div style={S.listCard}>
           {loading ? (
             <div style={{ padding: "2rem", textAlign: "center", color: "#aaa", fontSize: 13 }}>読み込み中...</div>
           ) : filteredParents.length === 0 ? (
             <div style={{ padding: "2rem", textAlign: "center", color: "#aaa", fontSize: 13 }}>商品がありません</div>
           ) : filteredParents.map(item => (
-            <ItemCard key={item.id} item={item} isChild={false} />
+            <ItemCard
+              key={item.id}
+              item={item}
+              children={childrenOf(item.id)}
+              isChild={false}
+              expandedIds={expandedIds}
+              toggleExpand={toggleExpand}
+              updateStatus={updateStatus}
+              setEditItem={setEditItem}
+              deleteItem={deleteItem}
+            />
           ))}
         </div>
       </div>
