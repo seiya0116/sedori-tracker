@@ -9,7 +9,7 @@ const STATUSES = [
 ];
 
 function calcProfit(item) {
-  const feeAmt = Math.floor(item.sell * item.fee / 100);
+  const feeAmt = Math.round(item.sell * item.fee / 100);
   const totalCost = item.buy + item.ship_in + item.ship_out + feeAmt;
   const minSell = totalCost + 1;
   const profit = item.sell - totalCost;
@@ -17,7 +17,16 @@ function calcProfit(item) {
   return { feeAmt, totalCost, profit, minSell, roi };
 }
 
-const EMPTY_FORM = { name: "", platform: "Amazon", buy: "", ship_in: "", sell: "", fee: "15", ship_out: "", status: "pending" };
+function calcBundleProfit(parent, children) {
+  const parentProfit = calcProfit(parent);
+  const childrenProfit = children.reduce((s, c) => s + calcProfit(c).profit, 0);
+  const totalProfit = parentProfit.profit + childrenProfit;
+  const totalCost = parentProfit.totalCost + children.reduce((s, c) => s + calcProfit(c).totalCost, 0);
+  const roi = totalCost > 0 ? Math.round((totalProfit / totalCost) * 100) : 0;
+  return { totalProfit, totalCost, roi };
+}
+
+const EMPTY_FORM = { name: "", platform: "メルカリ", buy: "", ship_in: "", sell: "", fee: "10", ship_out: "", status: "pending", parent_id: "" };
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -31,16 +40,25 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [resetMode, setResetMode] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetMsg, setResetMsg] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [isRecovery, setIsRecovery] = useState(false);
+  const [expandedIds, setExpandedIds] = useState({});
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setSession(session);
+      if (event === "PASSWORD_RECOVERY") setIsRecovery(true);
+    });
     return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (session) fetchItems();
-  }, [session]);
+    if (session && !isRecovery) fetchItems();
+  }, [session, isRecovery]);
 
   const fetchItems = async () => {
     setLoading(true);
@@ -49,10 +67,7 @@ export default function App() {
     setLoading(false);
   };
 
-  const showMsg = (text) => {
-    setMsg(text);
-    setTimeout(() => setMsg(""), 2000);
-  };
+  const showMsg = (text) => { setMsg(text); setTimeout(() => setMsg(""), 2000); };
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -63,14 +78,26 @@ export default function App() {
     } else {
       const { error } = await supabase.auth.signUp({ email, password });
       if (error) setAuthError(error.message);
-      else setAuthError("確認メールを送信しました。メールを確認してください。");
+      else setAuthError("確認メールを送信しました。");
     }
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setItems([]);
+  const handlePasswordReset = async (e) => {
+    e.preventDefault();
+    setResetMsg("");
+    const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, { redirectTo: window.location.origin });
+    if (error) setResetMsg(error.message);
+    else setResetMsg("パスワードリセットメールを送信しました。");
   };
+
+  const handleNewPassword = async (e) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) setResetMsg(error.message);
+    else { setIsRecovery(false); setResetMsg(""); setNewPassword(""); showMsg("パスワードを変更しました"); fetchItems(); }
+  };
+
+  const handleLogout = async () => { await supabase.auth.signOut(); setItems([]); };
 
   const addItem = async () => {
     if (!form.name || !form.sell) { alert("商品名と出品価格は必須です"); return; }
@@ -81,9 +108,10 @@ export default function App() {
       buy: parseFloat(form.buy) || 0,
       ship_in: parseFloat(form.ship_in) || 0,
       sell: parseFloat(form.sell) || 0,
-      fee: parseFloat(form.fee) || 15,
+      fee: parseFloat(form.fee) || 10,
       ship_out: parseFloat(form.ship_out) || 0,
       status: form.status,
+      parent_id: form.parent_id || null,
     };
     const { error } = await supabase.from("items").insert([newItem]);
     if (!error) { fetchItems(); setForm(EMPTY_FORM); showMsg("追加しました"); }
@@ -92,14 +120,11 @@ export default function App() {
   const updateItem = async () => {
     if (!editItem.name || !editItem.sell) return;
     const { error } = await supabase.from("items").update({
-      name: editItem.name,
-      platform: editItem.platform,
-      buy: parseFloat(editItem.buy) || 0,
-      ship_in: parseFloat(editItem.ship_in) || 0,
-      sell: parseFloat(editItem.sell) || 0,
-      fee: parseFloat(editItem.fee) || 15,
-      ship_out: parseFloat(editItem.ship_out) || 0,
-      status: editItem.status,
+      name: editItem.name, platform: editItem.platform,
+      buy: parseFloat(editItem.buy) || 0, ship_in: parseFloat(editItem.ship_in) || 0,
+      sell: parseFloat(editItem.sell) || 0, fee: parseFloat(editItem.fee) || 10,
+      ship_out: parseFloat(editItem.ship_out) || 0, status: editItem.status,
+      parent_id: editItem.parent_id || null,
     }).eq("id", editItem.id);
     if (!error) { fetchItems(); setEditItem(null); showMsg("更新しました"); }
   };
@@ -116,10 +141,24 @@ export default function App() {
     showMsg("削除しました");
   };
 
-  const filtered = filterStatus === "all" ? items : items.filter(i => i.status === filterStatus);
-  const totalInvest = items.reduce((s, i) => s + i.buy + i.ship_in, 0);
-  const totalProfit = items.reduce((s, i) => s + calcProfit(i).profit, 0);
-  const soldProfit = items.filter(i => i.status === "sold").reduce((s, i) => s + calcProfit(i).profit, 0);
+  const toggleExpand = (id) => setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
+
+  // 親子分類
+  const parentItems = items.filter(i => !i.parent_id);
+  const childrenOf = (id) => items.filter(i => i.parent_id === id);
+  const filteredParents = filterStatus === "all" ? parentItems : parentItems.filter(i => i.status === filterStatus);
+
+  const totalInvest = items.filter(i => !i.parent_id).reduce((s, i) => s + i.buy + i.ship_in, 0);
+  const totalProfit = items.filter(i => !i.parent_id).reduce((s, i) => {
+    const children = childrenOf(i.id);
+    if (children.length > 0) return s + calcBundleProfit(i, children).totalProfit;
+    return s + calcProfit(i).profit;
+  }, 0);
+  const soldProfit = items.filter(i => !i.parent_id && i.status === "sold").reduce((s, i) => {
+    const children = childrenOf(i.id);
+    if (children.length > 0) return s + calcBundleProfit(i, children).totalProfit;
+    return s + calcProfit(i).profit;
+  }, 0);
 
   const s = {
     wrap: { fontFamily: "'Hiragino Sans','Hiragino Kaku Gothic ProN',sans-serif", minHeight: "100vh", background: "#f5f5f3", color: "#1a1a1a" },
@@ -141,12 +180,160 @@ export default function App() {
     filterRow: { display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" },
     listCard: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 14, overflow: "hidden" },
     itemRow: { padding: "12px 14px", borderBottom: "0.5px solid #f0f0f0" },
+    childRow: { padding: "10px 14px 10px 28px", borderBottom: "0.5px solid #f0f0f0", background: "#fafaf9" },
     metaRow: { display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, color: "#666", marginTop: 6 },
     warning: { marginTop: 6, fontSize: 11, color: "#E24B4A", background: "#FCEBEB", padding: "4px 10px", borderRadius: 6, display: "inline-block" },
     authWrap: { maxWidth: 380, margin: "80px auto", padding: "0 1rem" },
     authCard: { background: "#fff", border: "0.5px solid #e5e5e5", borderRadius: 16, padding: "2rem" },
+    link: { fontSize: 12, color: "#185FA5", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", fontFamily: "inherit", padding: 0 },
   };
 
+  const ItemForm = ({ data, setData, onSubmit, onCancel, isEdit }) => (
+    <div style={s.card}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: "#555" }}>{isEdit ? "商品を編集" : "商品を追加"}</div>
+      <div style={s.formGrid}>
+        {[
+          { key: "name", label: "商品名", type: "text" },
+          { key: "buy", label: "仕入れ価格（¥）", type: "number" },
+          { key: "ship_in", label: "仕入れ送料（¥）", type: "number" },
+          { key: "sell", label: "出品価格（¥）", type: "number" },
+          { key: "fee", label: "手数料（%）", type: "number" },
+          { key: "ship_out", label: "発送送料（¥）", type: "number" },
+        ].map(f => (
+          <div key={f.key}>
+            <label style={s.label}>{f.label}</label>
+            <input type={f.type} value={data[f.key]} onChange={e => setData({ ...data, [f.key]: e.target.value })} style={s.input} />
+          </div>
+        ))}
+        <div>
+          <label style={s.label}>プラットフォーム</label>
+          <select value={data.platform} onChange={e => setData({ ...data, platform: e.target.value })} style={s.select}>
+            {PLATFORMS.map(p => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={s.label}>ステータス</label>
+          <select value={data.status} onChange={e => setData({ ...data, status: e.target.value })} style={s.select}>
+            {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
+          </select>
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={s.label}>まとめ売りセットに追加（任意）</label>
+          <select value={data.parent_id || ""} onChange={e => setData({ ...data, parent_id: e.target.value })} style={s.select}>
+            <option value="">なし（単品）</option>
+            {parentItems.filter(p => p.id !== data.id).map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onSubmit} style={{ ...s.btnSm, background: "#1a1a1a", color: "#fff", flex: 1, padding: "10px 0" }}>
+          {isEdit ? "更新する" : "追加する"}
+        </button>
+        {onCancel && <button onClick={onCancel} style={{ ...s.btnSm, background: "#f0f0f0", color: "#555", flex: 1, padding: "10px 0" }}>キャンセル</button>}
+      </div>
+    </div>
+  );
+
+  const ItemCard = ({ item, isChild }) => {
+    const children = childrenOf(item.id);
+    const hasChildren = children.length > 0;
+    const isExpanded = expandedIds[item.id];
+    const { profit, minSell, roi } = hasChildren ? calcBundleProfit(item, children) : calcProfit(item);
+    const st = STATUSES.find(s => s.value === item.status);
+    const sellTooLow = !hasChildren && item.sell < minSell;
+
+    return (
+      <>
+        <div style={isChild ? s.childRow : s.itemRow}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                {hasChildren && (
+                  <button onClick={() => toggleExpand(item.id)}
+                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, padding: "0 2px", color: "#185FA5", fontFamily: "inherit" }}>
+                    {isExpanded ? "▼" : "▶"}
+                  </button>
+                )}
+                {isChild && <span style={{ fontSize: 11, color: "#aaa" }}>└</span>}
+                <span style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</span>
+                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: st.bg, color: st.color, fontWeight: 600 }}>{st.label}</span>
+                <span style={{ fontSize: 11, color: "#aaa" }}>{item.platform}</span>
+                {hasChildren && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: "#f0f0f0", color: "#666" }}>セット {children.length}点</span>}
+              </div>
+              <div style={s.metaRow}>
+                <span>仕入れ <b style={{ color: "#1a1a1a" }}>¥{Number(item.buy).toLocaleString()}</b></span>
+                {!hasChildren && <span>出品価格 <b style={{ color: sellTooLow ? "#E24B4A" : "#1a1a1a" }}>¥{Number(item.sell).toLocaleString()}</b></span>}
+                {!hasChildren && <span>最低販売額 <b style={{ color: "#E24B4A" }}>¥{minSell.toLocaleString()}</b></span>}
+                <span>{hasChildren ? "セット利益" : "利益"} <b style={{ color: profit >= 0 ? "#0F6E56" : "#E24B4A" }}>¥{profit.toLocaleString()}</b></span>
+                <span>ROI <b style={{ color: roi >= 20 ? "#0F6E56" : roi >= 0 ? "#BA7517" : "#E24B4A" }}>{roi}%</b></span>
+              </div>
+              {sellTooLow && <div style={s.warning}>⚠ 出品価格が最低販売額を下回っています！¥{minSell.toLocaleString()}以上に設定してください</div>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", flexShrink: 0 }}>
+              <select value={item.status} onChange={e => updateStatus(item.id, e.target.value)}
+                style={{ padding: "4px 8px", border: "0.5px solid #ddd", borderRadius: 8, fontSize: 11, cursor: "pointer", outline: "none", fontFamily: "inherit", background: "#fff" }}>
+                {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
+              </select>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={() => setEditItem({ ...item })} style={{ ...s.btnSm, background: "#E6F1FB", color: "#185FA5" }}>編集</button>
+                <button onClick={() => deleteItem(item.id)} style={{ ...s.btnSm, background: "#fff7f7", color: "#E24B4A", border: "0.5px solid #ffd0d0" }}>削除</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {hasChildren && isExpanded && children.map(child => (
+          <ItemCard key={child.id} item={child} isChild={true} />
+        ))}
+      </>
+    );
+  };
+
+  // パスワード再設定画面
+  if (isRecovery) return (
+    <div style={s.wrap}>
+      <div style={s.authWrap}>
+        <div style={s.authCard}>
+          <h1 style={{ ...s.title, marginBottom: 4 }}>新しいパスワード設定</h1>
+          <p style={{ ...s.subtitle, marginBottom: "1.5rem" }}>新しいパスワードを入力してください</p>
+          <form onSubmit={handleNewPassword}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={s.label}>新しいパスワード（6文字以上）</label>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={s.input} placeholder="••••••••" required minLength={6} />
+            </div>
+            {resetMsg && <div style={{ fontSize: 12, color: "#E24B4A", marginBottom: 10 }}>{resetMsg}</div>}
+            <button type="submit" style={s.btn}>パスワードを変更する</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+
+  // パスワードリセット画面
+  if (resetMode) return (
+    <div style={s.wrap}>
+      <div style={s.authWrap}>
+        <div style={s.authCard}>
+          <h1 style={{ ...s.title, marginBottom: 4 }}>パスワードリセット</h1>
+          <p style={{ ...s.subtitle, marginBottom: "1.5rem" }}>登録したメールアドレスを入力してください</p>
+          <form onSubmit={handlePasswordReset}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={s.label}>メールアドレス</label>
+              <input type="email" value={resetEmail} onChange={e => setResetEmail(e.target.value)} style={s.input} placeholder="email@example.com" required />
+            </div>
+            {resetMsg && <div style={{ fontSize: 12, color: resetMsg.includes("送信") ? "#0F6E56" : "#E24B4A", marginBottom: 10 }}>{resetMsg}</div>}
+            <button type="submit" style={s.btn}>リセットメールを送信</button>
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <button style={s.link} onClick={() => { setResetMode(false); setResetMsg(""); }}>ログインに戻る</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ログイン・新規登録画面
   if (!session) return (
     <div style={s.wrap}>
       <div style={s.authWrap}>
@@ -166,10 +353,15 @@ export default function App() {
               <label style={s.label}>メールアドレス</label>
               <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={s.input} placeholder="email@example.com" required />
             </div>
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 8 }}>
               <label style={s.label}>パスワード</label>
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={s.input} placeholder="••••••••" required />
             </div>
+            {authMode === "login" && (
+              <div style={{ textAlign: "right", marginBottom: 12 }}>
+                <button style={s.link} onClick={() => setResetMode(true)} type="button">パスワードを忘れた方はこちら</button>
+              </div>
+            )}
             {authError && <div style={{ fontSize: 12, color: "#E24B4A", marginBottom: 10 }}>{authError}</div>}
             <button type="submit" style={s.btn}>{authMode === "login" ? "ログイン" : "新規登録"}</button>
           </form>
@@ -197,7 +389,7 @@ export default function App() {
             { label: "総仕入れ額", value: `¥${totalInvest.toLocaleString()}`, color: "#1a1a1a" },
             { label: "予想利益合計", value: `¥${totalProfit.toLocaleString()}`, color: totalProfit >= 0 ? "#0F6E56" : "#E24B4A" },
             { label: "確定利益", value: `¥${soldProfit.toLocaleString()}`, color: "#0F6E56" },
-            { label: "商品数", value: `${items.length}点`, color: "#185FA5" },
+            { label: "商品数", value: `${parentItems.length}点`, color: "#185FA5" },
           ].map(c => (
             <div key={c.label} style={s.summaryCard}>
               <div style={{ fontSize: 11, color: "#888", marginBottom: 3 }}>{c.label}</div>
@@ -207,72 +399,9 @@ export default function App() {
         </div>
 
         {editItem ? (
-          <div style={s.card}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: "#555" }}>商品を編集</div>
-            <div style={s.formGrid}>
-              {[
-                { key: "name", label: "商品名", type: "text" },
-                { key: "buy", label: "仕入れ価格（¥）", type: "number" },
-                { key: "ship_in", label: "仕入れ送料（¥）", type: "number" },
-                { key: "sell", label: "出品価格（¥）", type: "number" },
-                { key: "fee", label: "手数料（%）", type: "number" },
-                { key: "ship_out", label: "発送送料（¥）", type: "number" },
-              ].map(f => (
-                <div key={f.key}>
-                  <label style={s.label}>{f.label}</label>
-                  <input type={f.type} value={editItem[f.key]} onChange={e => setEditItem({ ...editItem, [f.key]: e.target.value })} style={s.input} />
-                </div>
-              ))}
-              <div>
-                <label style={s.label}>プラットフォーム</label>
-                <select value={editItem.platform} onChange={e => setEditItem({ ...editItem, platform: e.target.value })} style={s.select}>
-                  {PLATFORMS.map(p => <option key={p}>{p}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={s.label}>ステータス</label>
-                <select value={editItem.status} onChange={e => setEditItem({ ...editItem, status: e.target.value })} style={s.select}>
-                  {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
-                </select>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={updateItem} style={{ ...s.btnSm, background: "#1a1a1a", color: "#fff", flex: 1 }}>更新する</button>
-              <button onClick={() => setEditItem(null)} style={{ ...s.btnSm, background: "#f0f0f0", color: "#555", flex: 1 }}>キャンセル</button>
-            </div>
-          </div>
+          <ItemForm data={editItem} setData={setEditItem} onSubmit={updateItem} onCancel={() => setEditItem(null)} isEdit={true} />
         ) : (
-          <div style={s.card}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: "#555" }}>商品を追加</div>
-            <div style={s.formGrid}>
-              {[
-                { key: "name", label: "商品名", type: "text", placeholder: "ブロリーフィギュア" },
-                { key: "buy", label: "仕入れ価格（¥）", type: "number", placeholder: "7800" },
-                { key: "ship_in", label: "仕入れ送料（¥）", type: "number", placeholder: "0" },
-                { key: "sell", label: "出品価格（¥）", type: "number", placeholder: "17363" },
-                { key: "fee", label: "手数料（%）", type: "number", placeholder: "15" },
-                { key: "ship_out", label: "発送送料（¥）", type: "number", placeholder: "3500" },
-              ].map(f => (
-                <div key={f.key}>
-                  <label style={s.label}>{f.label}</label>
-                  <input type={f.type} placeholder={f.placeholder} value={form[f.key]} onChange={e => setForm({ ...form, [f.key]: e.target.value })} style={s.input} />
-                </div>
-              ))}
-              <div>
-                <label style={s.label}>プラットフォーム</label>
-                <select value={form.platform} onChange={e => setForm({ ...form, platform: e.target.value })} style={s.select}>
-                  {PLATFORMS.map(p => <option key={p}>{p}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={s.label}>ステータス</label>
-                <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} style={s.select}>
-                  {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
-                </select>
-              </div>
-            </div>
-            <button onClick={addItem} style={s.btn}>追加する</button>
-          </div>
+          <ItemForm data={form} setData={setForm} onSubmit={addItem} onCancel={null} isEdit={false} />
         )}
 
         <div style={s.filterRow}>
@@ -287,46 +416,11 @@ export default function App() {
         <div style={s.listCard}>
           {loading ? (
             <div style={{ padding: "2rem", textAlign: "center", color: "#aaa", fontSize: 13 }}>読み込み中...</div>
-          ) : filtered.length === 0 ? (
+          ) : filteredParents.length === 0 ? (
             <div style={{ padding: "2rem", textAlign: "center", color: "#aaa", fontSize: 13 }}>商品がありません</div>
-          ) : filtered.map(item => {
-            const { profit, minSell, roi } = calcProfit(item);
-            const st = STATUSES.find(s => s.value === item.status);
-            const sellTooLow = item.sell < minSell;
-            return (
-              <div key={item.id} style={s.itemRow}>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</span>
-                      <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: st.bg, color: st.color, fontWeight: 600 }}>{st.label}</span>
-                      <span style={{ fontSize: 11, color: "#aaa" }}>{item.platform}</span>
-                    </div>
-                    <div style={s.metaRow}>
-                      <span>仕入れ <b style={{ color: "#1a1a1a" }}>¥{Number(item.buy).toLocaleString()}</b></span>
-                      <span>出品価格 <b style={{ color: sellTooLow ? "#E24B4A" : "#1a1a1a" }}>¥{Number(item.sell).toLocaleString()}</b></span>
-                      <span>最低販売額 <b style={{ color: "#E24B4A" }}>¥{minSell.toLocaleString()}</b></span>
-                      <span>利益 <b style={{ color: profit >= 0 ? "#0F6E56" : "#E24B4A" }}>¥{profit.toLocaleString()}</b></span>
-                      <span>ROI <b style={{ color: roi >= 20 ? "#0F6E56" : roi >= 0 ? "#BA7517" : "#E24B4A" }}>{roi}%</b></span>
-                    </div>
-                    {sellTooLow && <div style={s.warning}>⚠ 出品価格が最低販売額を下回っています！¥{minSell.toLocaleString()}以上に設定してください</div>}
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", flexShrink: 0 }}>
-                    <select value={item.status} onChange={e => updateStatus(item.id, e.target.value)}
-                      style={{ padding: "4px 8px", border: "0.5px solid #ddd", borderRadius: 8, fontSize: 11, cursor: "pointer", outline: "none", fontFamily: "inherit", background: "#fff" }}>
-                      {STATUSES.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
-                    </select>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button onClick={() => setEditItem({ ...item })}
-                        style={{ ...s.btnSm, background: "#E6F1FB", color: "#185FA5" }}>編集</button>
-                      <button onClick={() => deleteItem(item.id)}
-                        style={{ ...s.btnSm, background: "#fff7f7", color: "#E24B4A", border: "0.5px solid #ffd0d0" }}>削除</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          ) : filteredParents.map(item => (
+            <ItemCard key={item.id} item={item} isChild={false} />
+          ))}
         </div>
       </div>
     </div>
