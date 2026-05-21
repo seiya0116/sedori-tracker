@@ -106,7 +106,7 @@ function ItemForm({ data, setData, onSubmit, onCancel, isEdit, parentOptions, co
   );
 }
 
-function ItemRow({ item, children, isChild, expandedIds, toggleExpand, updateStatus, setInlineEditId, inlineEditId, deleteItem }) {
+function ItemRow({ item, children, isChild, expandedIds, toggleExpand, updateStatus, setInlineEditId, inlineEditId, deleteItem, editFormElement }) {
   const hasChildren = children && children.length > 0;
   const isExpanded = expandedIds[item.id];
   const st = STATUSES.find(s => s.value === item.status) || STATUSES[0];
@@ -155,9 +155,13 @@ function ItemRow({ item, children, isChild, expandedIds, toggleExpand, updateSta
         </div>
       </div>
       {hasChildren && isExpanded && children.map(child => (
-        <ItemRow key={child.id} item={child} children={[]} isChild={true}
-          expandedIds={expandedIds} toggleExpand={toggleExpand} updateStatus={updateStatus}
-          setInlineEditId={setInlineEditId} inlineEditId={inlineEditId} deleteItem={deleteItem} />
+        <div key={child.id}>
+          <ItemRow item={child} children={[]} isChild={true}
+            expandedIds={expandedIds} toggleExpand={toggleExpand} updateStatus={updateStatus}
+            setInlineEditId={setInlineEditId} inlineEditId={inlineEditId} deleteItem={deleteItem}
+            editFormElement={editFormElement} />
+          {inlineEditId === child.id && editFormElement}
+        </div>
       ))}
     </>
   );
@@ -439,8 +443,18 @@ export default function App() {
                 setInlineEditId={handleInlineEdit}
                 inlineEditId={inlineEditId}
                 deleteItem={deleteItem}
+                editFormElement={editItem ? (
+                  <ItemForm
+                    data={editItem}
+                    setData={setEditItem}
+                    onSubmit={updateItem}
+                    onCancel={() => { setInlineEditId(null); setEditItem(null); }}
+                    isEdit={true}
+                    parentOptions={parentOptions}
+                    compact={true}
+                  />
+                ) : null}
               />
-              {/* インライン編集フォーム */}
               {inlineEditId === item.id && editItem && (
                 <ItemForm
                   data={editItem}
