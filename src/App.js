@@ -304,8 +304,8 @@ export default function App() {
   const pagedItems = filteredParents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const totalInvest = parentItems.reduce((s, i) => s + (i.buy || 0) + (i.ship_in || 0), 0);
-  const totalProfit = parentItems.reduce((s, i) => s + calcProfit(i).profit + childrenOf(i.id).reduce((cs, c) => cs + calcProfit(c).profit, 0), 0);
-  const soldProfit = parentItems.filter(i => i.status === "sold").reduce((s, i) => s + calcProfit(i).profit + childrenOf(i.id).reduce((cs, c) => cs + calcProfit(c).profit, 0), 0);
+  const totalProfit = parentItems.reduce((s, i) => s + calcProfit(i).profit, 0);
+  const soldProfit = parentItems.filter(i => i.status === "sold").reduce((s, i) => s + calcProfit(i).profit, 0);
   const parentOptions = parentItems.filter(p => !editItem || p.id !== editItem.id);
 
   const SortBtn = ({ k, label }) => (
