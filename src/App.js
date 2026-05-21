@@ -9,7 +9,7 @@ const STATUSES = [
 ];
 
 function calcProfit(item) {
-  const feeAmt = Math.round(item.sell * item.fee / 100);
+  const feeAmt = Math.floor(item.sell * item.fee / 100);
   const totalCost = item.buy + item.ship_in + item.ship_out + feeAmt;
   const minSell = totalCost + 1;
   const profit = item.sell - totalCost;
