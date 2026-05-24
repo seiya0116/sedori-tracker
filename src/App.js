@@ -310,6 +310,7 @@ export default function App() {
   const totalInvest = parentItems.reduce((s, i) => s + (i.buy || 0) + (i.ship_in || 0), 0);
   const totalProfit = parentItems.reduce((s, i) => s + calcProfit(i).profit, 0);
   const soldProfit = parentItems.filter(i => i.status === "sold").reduce((s, i) => s + calcProfit(i).profit, 0);
+  const soldRevenue = parentItems.filter(i => i.status === "sold").reduce((s, i) => s + (i.sell || 0), 0);
   const parentOptions = parentItems.filter(p => !editItem || p.id !== editItem.id);
 
   const SortBtn = ({ k, label }) => (
@@ -389,8 +390,9 @@ export default function App() {
           {[
             { label: "総仕入れ額", value: `¥${totalInvest.toLocaleString()}`, color: "#1a1a1a" },
             { label: "予想利益合計", value: `¥${totalProfit.toLocaleString()}`, color: totalProfit >= 0 ? "#0F6E56" : "#E24B4A" },
+            { label: "売上合計", value: `¥${soldRevenue.toLocaleString()}`, color: "#185FA5" },
             { label: "確定利益", value: `¥${soldProfit.toLocaleString()}`, color: "#0F6E56" },
-            { label: "商品数", value: `${parentItems.length}点`, color: "#185FA5" },
+            { label: "商品数", value: `${parentItems.length}点`, color: "#1a1a1a" },
           ].map(c => (
             <div key={c.label} style={S.summaryCard}>
               <div style={{ fontSize: 11, color: "#888", marginBottom: 3 }}>{c.label}</div>
